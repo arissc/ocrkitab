@@ -1,0 +1,31 @@
+const { contextBridge, ipcRenderer } = require('electron')
+
+contextBridge.exposeInMainWorld('api', {
+  selectFolder: (defaultPath) => ipcRenderer.invoke('select-folder', defaultPath),
+  selectPdf: () => ipcRenderer.invoke('select-pdf'),
+  selectTesseract: () => ipcRenderer.invoke('select-tesseract'),
+  selectMagick: () => ipcRenderer.invoke('select-magick'),
+  selectPdftoppm: () => ipcRenderer.invoke('select-pdftoppm'),
+  runOCR: (payload) => ipcRenderer.invoke('run-ocr', payload),
+  runOCRDL: (payload) => ipcRenderer.invoke('run-ocr-dl', payload),
+  runOCREasy: (payload) => ipcRenderer.invoke('run-ocr-easy', payload),
+  joinText: (payload) => ipcRenderer.invoke('join-text', payload),
+  getDefaults: () => ipcRenderer.invoke('get-defaults'),
+  getSettings: () => ipcRenderer.invoke('get-settings'),
+  getOcrStatus: () => ipcRenderer.invoke('get-ocr-status'),
+  saveSettings: (partial) => ipcRenderer.invoke('save-settings', partial),
+  openExplorer: (dirPath) => ipcRenderer.invoke('open-explorer', dirPath),
+  convertPdf: (payload) => ipcRenderer.invoke('convert-pdf', payload),
+  readFile: (filePath) => ipcRenderer.invoke('read-file', filePath),
+  listTxtFiles: (dir) => ipcRenderer.invoke('list-txt-files', dir),
+  listImageFiles: (dir) => ipcRenderer.invoke('list-image-files', dir),
+  translateChatGPT: (payload) => ipcRenderer.invoke('translate-chatgpt', payload),
+  getDbStatus: () => ipcRenderer.invoke('db-status'),
+  getTranslation: (payload) => ipcRenderer.invoke('get-translation', payload),
+  saveTranslation: (payload) => ipcRenderer.invoke('save-translation', payload),
+  listKitabs: () => ipcRenderer.invoke('list-kitabs'),
+  findKitabByFolder: (folderPath) => ipcRenderer.invoke('find-kitab-by-folder', folderPath),
+  createKitab: (payload) => ipcRenderer.invoke('create-kitab', payload),
+  onOcrProgress: (cb) => ipcRenderer.on('ocr-progress', (_e, data) => cb(data)),
+  onOcrComplete: (cb) => ipcRenderer.on('ocr-complete', (_e, data) => cb(data))
+})

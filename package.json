@@ -1,0 +1,52 @@
+{
+  "name": "ocr-electron-app",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5174 && cross-env ELECTRON_START_URL=http://localhost:5174 electron .\"",
+    "build:renderer": "vite build",
+    "start": "cross-env ELECTRON_START_URL=file://./dist/index.html electron .",
+    "build": "npm run build:renderer && npm run start",
+    "dist": "electron-builder --win"
+  },
+  "dependencies": {
+    "bootstrap": "^5.3.8",
+    "bootstrap-icons": "^1.13.1",
+    "mysql2": "^3.9.7",
+    "electron": "^31.0.0",
+    "react": "^18.3.1",
+    "react-bootstrap": "^2.10.10",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron-builder": "^24.13.3",
+    "vite": "^5.4.8",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.example.ocr-electron-app",
+    "productName": "OCR Desktop App",
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
+  }
+}
