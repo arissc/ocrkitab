@@ -1,1 +1,11 @@
-node_modules/
+﻿node_modules/
+dist/
+release/
+**/.venv/
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db
+engines/Kraken/
+engines/Unlimited-OCR-local/

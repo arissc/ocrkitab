@@ -23,7 +23,6 @@ def list_images(dir_path):
 
     def natural_key(path):
         base = os.path.basename(path)
-        # Split into text and digit chunks for natural sorting
         parts = re.split(r'(\d+)', base)
         return [int(part) if part.isdigit() else part.lower() for part in parts]
 
@@ -41,7 +40,6 @@ def ensure_dir(d):
 
 
 def map_lang(lang):
-    # EasyOCR expects 'ar' for Arabic; map common code 'ara' to 'ar'
     if not lang:
         return 'ar'
     l = lang.lower()
@@ -54,18 +52,32 @@ def main():
     utf8_stdout()
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input', required=True)
+    parser.add_argument('--input', required=False)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--file', required=False, help="Single image file to process")
     parser.add_argument('--lang', default='ara')
     parser.add_argument('--gpu', action='store_true')
     args = parser.parse_args()
+
+    if not args.input and not args.file:
+        sys.stderr.write("Either --input or --file is required\n")
+        sys.exit(1)
 
     in_dir = args.input
     out_dir = args.output
     lang = map_lang(args.lang)
     ensure_dir(out_dir)
 
-    imgs = list_images(in_dir)
+    imgs = []
+    if args.file:
+        if os.path.exists(args.file):
+            imgs = [args.file]
+        else:
+            sys.stderr.write(f"File not found: {args.file}\n")
+            sys.exit(1)
+    else:
+        imgs = list_images(in_dir)
+
     print(f"TOTAL {len(imgs)}")
     sys.stdout.flush()
 
@@ -87,7 +99,6 @@ def main():
     for img in imgs:
         try:
             results = reader.readtext(img, detail=1, paragraph=True)
-            # results: list of [bbox, text, score]
             lines = []
             for r in results:
                 if isinstance(r, (list, tuple)) and len(r) >= 2:

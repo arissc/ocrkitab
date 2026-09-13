@@ -2,7 +2,8 @@ import React from 'react'
 import { Nav, Button } from 'react-bootstrap'
 
 export default function Sidebar({ currentView, onNavigate, collapsed = false, onToggle }) {
-  
+  const kitabToolViews = ['kitab_tools', 'translate', 'ai_chat', 'pdf', 'pdf_split', 'ocr', 'gettext']
+  const isKitabToolsActive = kitabToolViews.includes(currentView)
 
   return (
     <div
@@ -25,19 +26,14 @@ export default function Sidebar({ currentView, onNavigate, collapsed = false, on
         <Nav.Link href="#" active={currentView === 'dashboard'} onClick={(e) => { e.preventDefault(); onNavigate('dashboard') }} style={{ cursor: 'pointer' }} aria-label="Dashboard">
           <i className={`bi bi-grid ${collapsed ? '' : 'me-2'}`} />{collapsed ? '' : ' Dashboard'}
         </Nav.Link>
-        <Nav.Link href="#" active={currentView === 'translate'} onClick={(e) => { e.preventDefault(); onNavigate('translate') }} style={{ cursor: 'pointer' }} aria-label="Translate">
-          <i className={`bi bi-translate ${collapsed ? '' : 'me-2'}`} />{collapsed ? '' : ' Kitab Reader'}
+        <Nav.Link href="#" active={currentView === 'search'} onClick={(e) => { e.preventDefault(); onNavigate('search') }} style={{ cursor: 'pointer' }} aria-label="Search">
+          <i className={`bi bi-search ${collapsed ? '' : 'me-2'}`} />{collapsed ? '' : ' Search'}
         </Nav.Link>
-
-        <div className={`text-muted small ${collapsed ? 'mt-3 mb-2' : 'mt-3 mb-2 ps-2'}`}>{collapsed ? '' : 'Tools'}</div>
-        <Nav.Link href="#" active={currentView === 'pdf'} onClick={(e) => { e.preventDefault(); onNavigate('pdf') }} style={{ cursor: 'pointer' }} aria-label="PDF to Image">
-          <i className={`bi bi-file-earmark-image ${collapsed ? '' : 'me-2'}`} />{collapsed ? '' : ' PDF to Image'}
+        <Nav.Link href="#" active={isKitabToolsActive} onClick={(e) => { e.preventDefault(); onNavigate('kitab_tools') }} style={{ cursor: 'pointer' }} aria-label="Kitab Tools">
+          <i className={`bi bi-grid-1x2 ${collapsed ? '' : 'me-2'}`} />{collapsed ? '' : ' Kitab Tools'}
         </Nav.Link>
-        <Nav.Link href="#" active={currentView === 'ocr'} onClick={(e) => { e.preventDefault(); onNavigate('ocr') }} style={{ cursor: 'pointer' }} aria-label="OCR">
-          <i className={`bi bi-filetype-txt ${collapsed ? '' : 'me-2'}`} />{collapsed ? '' : ' OCR'}
-        </Nav.Link>
-        <Nav.Link href="#" active={currentView === 'gettext'} onClick={(e) => { e.preventDefault(); onNavigate('gettext') }} style={{ cursor: 'pointer' }} aria-label="Get Text">
-          <i className={`bi bi-journal-text ${collapsed ? '' : 'me-2'}`} />{collapsed ? '' : ' Get Text'}
+        <Nav.Link href="#" active={currentView === 'settings'} onClick={(e) => { e.preventDefault(); onNavigate('settings') }} style={{ cursor: 'pointer' }} aria-label="Settings">
+          <i className={`bi bi-gear ${collapsed ? '' : 'me-2'}`} />{collapsed ? '' : ' Settings'}
         </Nav.Link>
       </Nav>
     </div>

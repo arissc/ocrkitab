@@ -1,4 +1,4 @@
-# OCR Desktop App (React + Electron)
+# Universe Reader (React + Electron)
 
 Desktop app providing a UI for two workflows based on your existing scripts:
 

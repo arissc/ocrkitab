@@ -1,18 +1,56 @@
 import React, { useEffect, useState } from 'react'
 import { Form, Button, InputGroup, ProgressBar, ListGroup } from 'react-bootstrap'
 
-export default function OCRPage() {
+export default function OCRPage({ initialInputFolder = '', initialOutputFolder = '', flowMode = '', onBack }) {
   const api = typeof window !== 'undefined' ? window.api : undefined
   const [inputFolder, setInputFolder] = useState('')
   const [outputFolder, setOutputFolder] = useState('')
   const [tesseractPath, setTesseractPath] = useState('')
   const [lang, setLang] = useState('ara')
   const [ocrEngine, setOcrEngine] = useState('tesseract')
+  const [layoutMode, setLayoutMode] = useState('full')
+  const [boxPaddingPct, setBoxPaddingPct] = useState('0.01')
+  const [notePaddingPct, setNotePaddingPct] = useState('0.01')
+  const [outsideFormat, setOutsideFormat] = useState('flat')
   const [logs, setLogs] = useState([])
   const [progress, setProgress] = useState({ index: 0, total: 0 })
   const [running, setRunning] = useState(false)
+  const isGenerateFlow = flowMode === 'create_kitab_generate'
+
+  const getParentFolder = (dir) => {
+    const value = String(dir || '').trim()
+    if (!value) return ''
+    const normalized = value.replace(/[\\/]+$/, '')
+    if (!normalized) return ''
+    const parts = normalized.split(/[\\/]/)
+    if (parts.length <= 1) return normalized
+    const parent = parts.slice(0, -1).join('\\')
+    return parent || normalized
+  }
+
+  const persistFolders = async (nextInputFolder, nextOutputFolder) => {
+    if (!api || !api.saveSettings) return
+    await api.saveSettings({
+      inputFolder: nextInputFolder,
+      outputFolder: nextOutputFolder
+    })
+  }
+
+  const persistLayoutSettings = async (partial = {}) => {
+    if (!api || !api.saveSettings) return
+    await api.saveSettings(partial)
+  }
+
+  const normalizePctValue = (value, fallback = 0.01) => {
+    const num = Number(value)
+    if (!Number.isFinite(num)) return fallback
+    return Math.max(0, Math.min(0.2, num))
+  }
 
   useEffect(() => {
+    let offProgress
+    let offComplete
+
     if (api && api.getDefaults) {
       api.getDefaults().then(def => {
         setInputFolder(def.inputFolder)
@@ -20,6 +58,10 @@ export default function OCRPage() {
         setTesseractPath(def.tesseractPath)
         setLang(def.lang)
         setOcrEngine(def.ocrEngine || 'tesseract')
+        setLayoutMode(def.ocrLayoutMode || 'full')
+        setBoxPaddingPct(String(def.ocrBoxPaddingPct ?? '0.01'))
+        setNotePaddingPct(String(def.ocrNotePaddingPct ?? '0.01'))
+        setOutsideFormat(def.ocrOutsideFormat || 'flat')
       })
     }
 
@@ -36,28 +78,61 @@ export default function OCRPage() {
       })
     }
 
-    api && api.onOcrProgress && api.onOcrProgress((p) => {
+    if (api && api.onOcrProgress) {
+      offProgress = api.onOcrProgress((p) => {
       setProgress({ index: p.index, total: p.total })
       setLogs(prev => [{
         type: p.ok ? 'info' : 'error',
         text: `${p.ok ? 'OK' : 'ERR'}: ${p.file}${p.error ? ' - ' + p.error : ''}`
       }, ...prev])
-    })
-    api && api.onOcrComplete && api.onOcrComplete((p) => {
+      })
+    }
+    if (api && api.onOcrComplete) {
+      offComplete = api.onOcrComplete((p) => {
       setRunning(false)
       setLogs(prev => [{ type: 'info', text: `Selesai OCR. Total: ${p.total}` }, ...prev])
-    })
+      })
+    }
+
+    return () => {
+      try { offProgress && offProgress() } catch (_) {}
+      try { offComplete && offComplete() } catch (_) {}
+    }
   }, [])
+
+  useEffect(() => {
+    const applyFlowFolders = async () => {
+      const nextInputFolder = String(initialInputFolder || '').trim()
+      const nextOutputFolder = String(initialOutputFolder || '').trim()
+      if (!nextInputFolder && !nextOutputFolder) return
+      setInputFolder(nextInputFolder)
+      setOutputFolder(nextOutputFolder)
+      try {
+        if (api?.ensureFolder && nextInputFolder) await api.ensureFolder(nextInputFolder)
+        if (api?.ensureFolder && nextOutputFolder) await api.ensureFolder(nextOutputFolder)
+        await persistFolders(nextInputFolder, nextOutputFolder)
+      } catch (_) {}
+    }
+    applyFlowFolders()
+  }, [api, initialInputFolder, initialOutputFolder])
 
   const pickInput = async () => {
     if (!api || !api.selectFolder) return
     const dir = await api.selectFolder(inputFolder)
-    if (dir) setInputFolder(dir)
+    if (dir) {
+      const nextOutputFolder = getParentFolder(dir)
+      setInputFolder(dir)
+      setOutputFolder(nextOutputFolder)
+      await persistFolders(dir, nextOutputFolder)
+    }
   }
   const pickOutput = async () => {
     if (!api || !api.selectFolder) return
     const dir = await api.selectFolder(outputFolder)
-    if (dir) setOutputFolder(dir)
+    if (dir) {
+      setOutputFolder(dir)
+      await persistFolders(inputFolder, dir)
+    }
   }
   const pickTesseract = async () => {
     if (!api || !api.selectTesseract) return
@@ -78,19 +153,40 @@ export default function OCRPage() {
     setRunning(true)
     setLogs(prev => [{ type: 'info', text: `Mulai OCR (${ocrEngine})...` }, ...prev])
     setProgress({ index: 0, total: 0 })
-    let res
-    if (ocrEngine === 'arabic_dl' && api.runOCRDL) {
-      res = await api.runOCRDL({ inputFolder, outputFolder, lang })
-    } else if (ocrEngine === 'easyocr' && api.runOCREasy) {
-      res = await api.runOCREasy({ inputFolder, outputFolder, lang })
-    } else if (api.runOCR) {
-      res = await api.runOCR({ inputFolder, outputFolder, tesseractPath, lang })
-    } else {
-      res = { ok: false, error: 'API OCR tidak tersedia.' }
-    }
-    if (!res.ok) {
+    try {
+      const layoutPayload = {
+        layoutMode,
+        boxPaddingPct: normalizePctValue(boxPaddingPct),
+        notePaddingPct: normalizePctValue(notePaddingPct),
+        outsideFormat
+      }
+      let res
+      if (ocrEngine === 'arabic_dl') {
+        if (!api.runOCRDL) throw new Error('API runOCRDL tidak tersedia.')
+        res = await api.runOCRDL({ inputFolder, outputFolder, lang, ...layoutPayload })
+      } else if (ocrEngine === 'easyocr') {
+        if (!api.runOCREasy) throw new Error('API runOCREasy tidak tersedia.')
+        res = await api.runOCREasy({ inputFolder, outputFolder, lang, ...layoutPayload })
+      } else if (ocrEngine === 'kraken' || ocrEngine === 'kraken_arabic') {
+        if (!api.runOCRKraken) throw new Error('API runOCRKraken tidak tersedia.')
+        res = await api.runOCRKraken({ inputFolder, outputFolder, lang, ...layoutPayload })
+      } else if (ocrEngine === 'google_vision') {
+        if (!api.runOCRVision) throw new Error('API runOCRVision tidak tersedia.')
+        res = await api.runOCRVision({ inputFolder, outputFolder, lang, ...layoutPayload })
+      } else if (ocrEngine === 'unlimited_ocr') {
+        if (!api.runOCRUnlimited) throw new Error('API runOCRUnlimited tidak tersedia.')
+        res = await api.runOCRUnlimited({ inputFolder, outputFolder, lang, ...layoutPayload })
+      } else {
+        if (!api.runOCR) throw new Error('API runOCR tidak tersedia.')
+        res = await api.runOCR({ inputFolder, outputFolder, tesseractPath, lang, ...layoutPayload })
+      }
+      if (!res || !res.ok) {
+        setRunning(false)
+        setLogs(prev => [{ type: 'error', text: `Gagal OCR: ${res?.error || 'Unknown error'}` }, ...prev])
+      }
+    } catch (e) {
       setRunning(false)
-      setLogs(prev => [{ type: 'error', text: `Gagal OCR: ${res.error}` }, ...prev])
+      setLogs(prev => [{ type: 'error', text: `Gagal OCR: ${e?.message || String(e)}` }, ...prev])
     }
   }
 
@@ -98,11 +194,36 @@ export default function OCRPage() {
 
   return (
     <>
+      {isGenerateFlow && (
+        <div className="mb-3 d-flex flex-column gap-2">
+          <div>
+            <Button variant="outline-secondary" onClick={onBack}>
+              <i className="bi bi-arrow-left me-1" /> Kembali ke Tambah Kitab
+            </Button>
+          </div>
+          <div className="alert alert-secondary mb-0">
+            Flow generate aktif. Folder gambar dan folder teks sudah diisi otomatis, dan folder yang belum ada akan dibuat saat Anda masuk ke halaman ini.
+          </div>
+        </div>
+      )}
       <Form>
         <Form.Group className="mb-3">
           <Form.Label>Folder input gambar (.jpg)</Form.Label>
           <InputGroup>
-            <Form.Control value={inputFolder} onChange={e => setInputFolder(e.target.value)} />
+            <Form.Control
+              value={inputFolder}
+              onChange={e => {
+                const nextInputFolder = e.target.value
+                setInputFolder(nextInputFolder)
+                setOutputFolder(getParentFolder(nextInputFolder))
+              }}
+              onBlur={async e => {
+                const nextInputFolder = e.target.value
+                const nextOutputFolder = getParentFolder(nextInputFolder)
+                setOutputFolder(nextOutputFolder)
+                await persistFolders(nextInputFolder, nextOutputFolder)
+              }}
+            />
             <Button variant="secondary" onClick={pickInput} disabled={!api}>Select Folder</Button>
           </InputGroup>
         </Form.Group>
@@ -110,7 +231,14 @@ export default function OCRPage() {
         <Form.Group className="mb-3">
           <Form.Label>Folder output teks</Form.Label>
           <InputGroup>
-            <Form.Control value={outputFolder} onChange={e => setOutputFolder(e.target.value)} />
+            <Form.Control
+              value={outputFolder}
+              onChange={e => setOutputFolder(e.target.value)}
+              onBlur={async e => {
+                const nextOutputFolder = e.target.value
+                await persistFolders(inputFolder, nextOutputFolder)
+              }}
+            />
             <Button variant="secondary" onClick={pickOutput} disabled={!api}>Select Folder</Button>
           </InputGroup>
         </Form.Group>
@@ -134,6 +262,73 @@ export default function OCRPage() {
             <option value="tesseract">Tesseract</option>
             <option value="arabic_dl">Arabic Deep Learning</option>
             <option value="easyocr">EasyOCR</option>
+            <option value="kraken_arabic">Kraken (Arabic)</option>
+            <option value="google_vision">Google Vision API</option>
+            <option value="unlimited_ocr">Unlimited-OCR (Local)</option>
+          </Form.Select>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>Mode Layout OCR</Form.Label>
+          <Form.Select
+            value={layoutMode}
+            onChange={async e => {
+              const v = e.target.value
+              setLayoutMode(v)
+              await persistLayoutSettings({ ocrLayoutMode: v })
+            }}
+          >
+            <option value="full">Full Page</option>
+            <option value="box_notes">Inside Box + Mark Outside</option>
+          </Form.Select>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>Box Padding (%)</Form.Label>
+          <Form.Control
+            type="number"
+            min="0"
+            max="0.2"
+            step="0.005"
+            value={boxPaddingPct}
+            onChange={e => setBoxPaddingPct(e.target.value)}
+            onBlur={async e => {
+              const v = String(normalizePctValue(e.target.value, 0.01))
+              setBoxPaddingPct(v)
+              await persistLayoutSettings({ ocrBoxPaddingPct: Number(v) })
+            }}
+          />
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>Note Padding (%)</Form.Label>
+          <Form.Control
+            type="number"
+            min="0"
+            max="0.2"
+            step="0.005"
+            value={notePaddingPct}
+            onChange={e => setNotePaddingPct(e.target.value)}
+            onBlur={async e => {
+              const v = String(normalizePctValue(e.target.value, 0.01))
+              setNotePaddingPct(v)
+              await persistLayoutSettings({ ocrNotePaddingPct: Number(v) })
+            }}
+          />
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>Format Outside Box</Form.Label>
+          <Form.Select
+            value={outsideFormat}
+            onChange={async e => {
+              const v = e.target.value
+              setOutsideFormat(v)
+              await persistLayoutSettings({ ocrOutsideFormat: v })
+            }}
+          >
+            <option value="flat">Append di akhir</option>
+            <option value="zoned">Per Zona di akhir</option>
           </Form.Select>
         </Form.Group>
 

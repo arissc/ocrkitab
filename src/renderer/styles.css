@@ -1,5 +1,6 @@
 :root { color-scheme: light dark; }
 body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 20px; }
+html[data-bs-theme="light"] body { background-color: #e9ecef !important; }
 /* Legacy styles scoped to avoid conflicts with Bootstrap */
 .legacy-container { max-width: 900px; margin: 0 auto; }
 .legacy h1 { font-size: 20px; margin-bottom: 16px; }
@@ -61,3 +62,39 @@ body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 20px; }
 /* Modal header title truncation for long file paths */
 .modal-title-wrap { min-width: 0; }
 .modal-title-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ai-chat-scroll { scrollbar-width: thin; scrollbar-color: rgba(120,120,120,.55) transparent; }
+.ai-chat-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.ai-chat-scroll::-webkit-scrollbar-thumb { background: rgba(120,120,120,.35); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+.ai-chat-scroll::-webkit-scrollbar-thumb:hover { background: rgba(120,120,120,.55); border: 2px solid transparent; background-clip: padding-box; }
+.ai-chat-scroll::-webkit-scrollbar-track { background: transparent; }
+
+.ai-chat-bubble { box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.ai-chat-bubble-user { border-top-right-radius: 0.6rem !important; }
+.ai-chat-bubble-assistant { border-top-left-radius: 0.6rem !important; }
+
+.ai-chat-send-btn { border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+
+.tool-panel-card {
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+  background-color: var(--bs-tertiary-bg);
+}
+
+.tool-panel-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0.5rem 1rem rgba(0,0,0,.12) !important;
+}
+
+.tool-panel-icon {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(var(--bs-primary-rgb, 13,110,253), .12);
+  color: var(--bs-primary);
+  font-size: 1.25rem;
+  flex: 0 0 auto;
+}
