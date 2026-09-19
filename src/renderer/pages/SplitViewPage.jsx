@@ -130,7 +130,17 @@ const getSavedSplitSession = (settings, folderPath) => {
   return null
 }
 
-export default function SplitViewPage({ initialFolder = '', initialFile = '', initialImageFolder = '', onBack }) {
+const isSameSplitPath = (left, right) => {
+  if (!left || !right) return false
+  return String(left).replace(/\\/g, '/').toLowerCase() === String(right).replace(/\\/g, '/').toLowerCase()
+}
+
+const getPathLeaf = (filePath) => {
+  if (!filePath) return ''
+  return String(filePath).split(/[/\\]/).filter(Boolean).pop() || ''
+}
+
+export default function SplitViewPage({ initialFolder = '', initialFile = '', initialImageFolder = '', originKitabId = null, onBack, onFullViewChange }) {
   const api = typeof window !== 'undefined' ? window.api : undefined
   const [folder, setFolder] = useState(initialFolder || '')
   const [file, setFile] = useState(initialFile || '')
@@ -168,6 +178,8 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
     translation: true,
     tools: true
   })
+  const [fullView, setFullView] = useState(false)
+  const fullViewRestoreRef = useRef(null)
   const [versionHistoryModal, setVersionHistoryModal] = useState({ show: false, loading: false })
   const [versionHistory, setVersionHistory] = useState([])
   const [feedbackHistory, setFeedbackHistory] = useState([])
@@ -235,6 +247,10 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
   const [audioPaused, setAudioPaused] = useState(false)
   
   const [kitabInfo, setKitabInfo] = useState(null)
+  const [markedPage, setMarkedPage] = useState(null)
+  const markedPageRef = useRef(null)
+  const [markHydrated, setMarkHydrated] = useState(false)
+  const saveSessionGenerationRef = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -304,27 +320,80 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
     setImageFolder(initialImageFolder || '')
   }, [initialFolder, initialFile, initialImageFolder])
 
-  // Save last opened split view state
   useEffect(() => {
-    if (!folder || !file || !api || !api.saveSettings) return
+    let cancelled = false
+    const loadMarkedPage = async () => {
+      setMarkHydrated(false)
+      if (!api || !folder) {
+        markedPageRef.current = null
+        setMarkedPage(null)
+        setMarkHydrated(true)
+        return
+      }
+      try {
+        const settings = api.getSettings ? await api.getSettings() : null
+        if (cancelled) return
+        const session = getSavedSplitSession(settings, folder)
+        if (session && session.marked && session.file) {
+          const mark = { folder: session.folder || folder, file: session.file }
+          markedPageRef.current = mark
+          setMarkedPage(mark)
+        } else {
+          markedPageRef.current = null
+          setMarkedPage(null)
+        }
+      } catch (_) {
+        if (!cancelled) {
+          markedPageRef.current = null
+          setMarkedPage(null)
+        }
+      } finally {
+        if (!cancelled) setMarkHydrated(true)
+      }
+    }
+    loadMarkedPage()
+    return () => { cancelled = true }
+  }, [api, folder])
+
+  // Save last opened split view state.
+  // Marked page pins dashboard last page until Next is used on that marked page.
+  useEffect(() => {
+    if (!folder || !file || !api || !api.saveSettings || !markHydrated) return
 
     let cancelled = false
+    const saveToken = ++saveSessionGenerationRef.current
     const saveLastSession = async () => {
-      const session = {
-        folder,
-        file,
-        imageFolder,
-        timestamp: Date.now()
-      }
+      const mark = markedPageRef.current
+      const markActive = Boolean(mark && isSameSplitPath(mark.folder, folder) && mark.file)
+      const onMarkedPage = markActive && isSameSplitPath(mark.file, file)
       try {
         let currentSettings = {}
         if (api.getSettings) {
           currentSettings = await api.getSettings()
         }
-        if (cancelled) return
+        if (cancelled || saveSessionGenerationRef.current !== saveToken) return
         const currentSessions = currentSettings && currentSettings.lastOpenedKitabSessions && typeof currentSettings.lastOpenedKitabSessions === 'object'
           ? currentSettings.lastOpenedKitabSessions
           : {}
+
+        if (markActive && !onMarkedPage) {
+          const pinned = currentSessions[folder]
+          if (pinned && pinned.file) {
+            await api.saveSettings({
+              lastOpenedSplit: pinned
+            })
+          }
+          return
+        }
+
+        const session = {
+          folder,
+          file,
+          imageFolder,
+          kitabId: originKitabId || null,
+          timestamp: Date.now(),
+          marked: onMarkedPage
+        }
         await api.saveSettings({
           lastOpenedSplit: session,
           lastOpenedKitabSessions: {
@@ -339,7 +408,16 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
 
     saveLastSession()
     return () => { cancelled = true }
-  }, [folder, file, imageFolder, api])
+  }, [folder, file, imageFolder, originKitabId, api, markHydrated, markedPage])
+
+  const handleBack = () => {
+    onBack?.({
+      folder,
+      file,
+      imageFolder,
+      kitabId: originKitabId || null
+    })
+  }
 
   useEffect(() => {
     if (api) {
@@ -1153,6 +1231,8 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
   const curIndex = filesList.findIndex(p => p === file)
   const canPrev = curIndex > 0
   const canNext = curIndex >= 0 && curIndex < filesList.length - 1
+  const isCurrentPageMarked = Boolean(markedPage && isSameSplitPath(markedPage.folder, folder) && isSameSplitPath(markedPage.file, file))
+  const hasActiveMark = Boolean(markedPage && isSameSplitPath(markedPage.folder, folder) && markedPage.file)
   const goPrev = () => {
     if (!canPrev) return
     const nextFile = filesList[curIndex - 1]
@@ -1161,7 +1241,24 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
   const goNext = () => {
     if (!canNext) return
     const nextFile = filesList[curIndex + 1]
-    if (nextFile) setFile(nextFile)
+    if (!nextFile) return
+    const mark = markedPageRef.current
+    if (mark && isSameSplitPath(mark.folder, folder) && isSameSplitPath(mark.file, file)) {
+      markedPageRef.current = null
+      setMarkedPage(null)
+    }
+    setFile(nextFile)
+  }
+  const toggleMarkPage = () => {
+    if (!folder || !file) return
+    if (isCurrentPageMarked) {
+      markedPageRef.current = null
+      setMarkedPage(null)
+      return
+    }
+    const mark = { folder, file }
+    markedPageRef.current = mark
+    setMarkedPage(mark)
   }
 
   const copyImage = async () => {
@@ -2185,6 +2282,18 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
     return () => window.removeEventListener('click', closeMenu)
   }, [])
 
+  useEffect(() => {
+    onFullViewChange?.(fullView)
+    document.body.classList.toggle('split-fullview', fullView)
+  }, [fullView, onFullViewChange])
+
+  useEffect(() => {
+    return () => {
+      document.body.classList.remove('split-fullview')
+      onFullViewChange?.(false)
+    }
+  }, [onFullViewChange])
+
   const exactHit = assistContext?.tmHits?.exact || null
   const similarHits = Array.isArray(assistContext?.tmHits?.similar) ? assistContext.tmHits.similar : []
   const substringHits = Array.isArray(assistContext?.tmHits?.substring) ? assistContext.tmHits.substring : []
@@ -2205,6 +2314,80 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
     setSectionVisibility((prev) => ({ ...prev, [key]: !prev[key] }))
   }
 
+  const enterFullView = () => {
+    if (fullView) return
+    fullViewRestoreRef.current = {
+      viewMode,
+      sectionVisibility: { ...sectionVisibility }
+    }
+    setViewMode('ocr')
+    setSectionVisibility({
+      image: true,
+      ocrText: false,
+      translation: true,
+      tools: false
+    })
+    setFullView(true)
+  }
+
+  const exitFullView = () => {
+    if (!fullView) return
+    const restore = fullViewRestoreRef.current
+    setFullView(false)
+    if (restore) {
+      setViewMode(restore.viewMode)
+      setSectionVisibility(restore.sectionVisibility)
+      fullViewRestoreRef.current = null
+    }
+  }
+
+  const toggleFullView = () => {
+    if (fullView) exitFullView()
+    else enterFullView()
+  }
+
+  useEffect(() => {
+    if (!fullView) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        const restore = fullViewRestoreRef.current
+        setFullView(false)
+        if (restore) {
+          setViewMode(restore.viewMode)
+          setSectionVisibility(restore.sectionVisibility)
+          fullViewRestoreRef.current = null
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [fullView])
+
+  const panelHeight = fullView ? 'calc(100vh - 148px)' : '60vh'
+  const renderFullViewButton = () => (
+    <Button variant={fullView ? 'primary' : 'outline-secondary'} size="sm" onClick={toggleFullView}>
+      <i className={`bi ${fullView ? 'bi-fullscreen-exit' : 'bi-arrows-fullscreen'} me-1`} />
+      {fullView ? 'Exit Fullview' : 'Fullview'}
+    </Button>
+  )
+
+  const renderMarkPageButton = () => (
+    <Button
+      variant={isCurrentPageMarked ? 'warning' : 'outline-secondary'}
+      size="sm"
+      disabled={!file}
+      onClick={toggleMarkPage}
+      title={isCurrentPageMarked
+        ? 'Halaman ini ditandai sebagai last page dashboard. Next di halaman ini akan melepas mark.'
+        : hasActiveMark
+          ? 'Ada mark di halaman lain. Klik untuk pindahkan mark ke halaman ini.'
+          : 'Tandai halaman ini sebagai last page di dashboard'}
+    >
+      <i className={`bi ${isCurrentPageMarked ? 'bi-bookmark-fill' : 'bi-bookmark'} me-1`} />
+      {isCurrentPageMarked ? 'Marked' : 'Mark Page'}
+    </Button>
+  )
+
   const renderSourceUnitCard = (label, item) => (
     <div className="border rounded-2 p-2">
       <div className="fw-semibold mb-1">{label}</div>
@@ -2224,9 +2407,9 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
   )
 
   return (
-    <>
-      {notice && <Alert variant={noticeVariant} className="mb-3">{notice}</Alert>}
-      {translatedMeta?.low_confidence ? (
+    <div className={fullView ? 'split-fullview-page d-flex flex-column h-100' : undefined}>
+      {!fullView && notice && <Alert variant={noticeVariant} className="mb-3">{notice}</Alert>}
+      {!fullView && translatedMeta?.low_confidence ? (
         <Alert variant="warning" className="mb-3">
           Low confidence pada terjemahan tersimpan.
           {translatedMeta?.latest_version?.version_number ? ` Versi saat ini: ${translatedMeta.latest_version.version_number}.` : ''}
@@ -2235,7 +2418,7 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
             : ''}
         </Alert>
       ) : null}
-      {aiConfidence?.low_confidence && cliResult ? (
+      {!fullView && aiConfidence?.low_confidence && cliResult ? (
         <Alert variant="warning" className="mb-3">
           Hasil AI terdeteksi low confidence.
           {Array.isArray(aiConfidence?.confidence_reasons) && aiConfidence.confidence_reasons.length > 0
@@ -2244,12 +2427,17 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
         </Alert>
       ) : null}
       {(kitabInfo?.nama_kitab || folder) && (
-        <div className="mb-3 border-bottom pb-2 d-flex justify-content-between align-items-end">
-          <div>
-            <h5 className="mb-0">{kitabInfo?.nama_kitab || (folder || '').split('\\').filter(Boolean).pop()}</h5>
-            {kitabInfo?.pengarang && <small className="text-muted">{kitabInfo.pengarang}</small>}
+        <div className={`${fullView ? 'mb-2' : 'mb-3'} border-bottom pb-2 d-flex justify-content-between align-items-end gap-3`}>
+          <div className="min-w-0">
+            <h5 className="mb-0">{kitabInfo?.nama_kitab || getPathLeaf(folder)}</h5>
+            {folder ? (
+              <small className="text-muted d-block" style={{ overflowWrap: 'anywhere' }} title={folder}>
+                {folder}{file ? ` · ${getPathLeaf(file)}` : ''}
+              </small>
+            ) : null}
+            {kitabInfo?.pengarang && <small className="text-muted d-block">{kitabInfo.pengarang}</small>}
           </div>
-          <div className="btn-group">
+          <div className="btn-group flex-shrink-0">
             <Button variant={viewMode === 'reader' ? 'primary' : 'outline-secondary'} size="sm" onClick={() => setViewMode('reader')}>
               <i className="bi bi-book me-1" /> Reader
             </Button>
@@ -2263,14 +2451,16 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
         </div>
       )}
       {viewMode === 'ocr' ? (
-        <>
+        <div className={fullView ? 'd-flex flex-column flex-grow-1 min-h-0' : undefined}>
           <div className="d-flex justify-content-between align-items-center gap-3 mb-2 flex-wrap">
             <div className="d-flex align-items-center gap-2 flex-wrap">
-              <Button variant="outline-secondary" size="sm" onClick={onBack}><i className="bi bi-arrow-left me-2" /> Back</Button>
+              <Button variant="outline-secondary" size="sm" onClick={handleBack}><i className="bi bi-arrow-left me-2" /> Back</Button>
               <Button variant="outline-secondary" size="sm" disabled={!canPrev} onClick={goPrev}><i className="bi bi-chevron-left" /> Prev</Button>
               <Button variant="outline-secondary" size="sm" disabled={!canNext} onClick={goNext}>Next <i className="bi bi-chevron-right" /></Button>
+              {renderMarkPageButton()}
             </div>
             <div className="d-flex align-items-center gap-2 flex-wrap">
+              {renderFullViewButton()}
               <Button variant={sectionVisibility.image ? 'primary' : 'outline-secondary'} size="sm" onClick={() => toggleSectionVisibility('image')}>
                 <i className={`bi ${sectionVisibility.image ? 'bi-eye-slash' : 'bi-eye'} me-1`} />
                 {sectionVisibility.image ? 'Hide Image' : 'Show Image'}
@@ -2286,9 +2476,9 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
             </div>
           </div>
 
-          <div className="d-flex gap-3 align-items-start flex-nowrap">
+          <div className={`d-flex gap-3 flex-nowrap ${fullView ? 'align-items-stretch flex-grow-1 min-h-0' : 'align-items-start'}`}>
             {sectionVisibility.image && (
-              <div style={{ flex: '1 1 0%', minWidth: 0 }}>
+              <div style={{ flex: '1 1 0%', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                 <div className="d-flex justify-content-between align-items-center mb-1">
                   <span className="fw-semibold small text-muted">Image View</span>
                   <div className="d-flex align-items-center gap-2">
@@ -2306,7 +2496,9 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
                   onMouseUp={stopPan}
                   onMouseLeave={stopPan}
                   style={{
-                    height: '60vh',
+                    height: panelHeight,
+                    flex: fullView ? '1 1 auto' : undefined,
+                    minHeight: 0,
                     overflow: 'hidden',
                     borderRadius: '0.5rem',
                     border: '1px solid rgba(0,0,0,.125)',
@@ -2336,20 +2528,22 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
                     <div className="text-muted p-3">Tidak ada gambar ditemukan di folder ini.</div>
                   )}
                 </div>
-                <div className="d-flex align-items-center gap-2 mt-2 flex-wrap">
-                  <div className="h6 mb-0">Split View: {file ? (file.split('\\').pop() || '') : '-'}</div>
-                  <Button variant="outline-secondary" size="sm" onClick={zoomOut}>-</Button>
-                  <Button variant="outline-secondary" size="sm" onClick={zoomIn}>+</Button>
-                  <Button variant="outline-secondary" size="sm" onClick={resetView}>Reset</Button>
-                  <Button variant="outline-primary" size="sm" onClick={syncSourceUnits} disabled={!folder || sourceUnitSyncing}>
-                    {sourceUnitSyncing ? 'Syncing...' : 'Sync Segments'}
-                  </Button>
-                </div>
+                {!fullView && (
+                  <div className="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                    <div className="h6 mb-0">Split View: {file ? (file.split('\\').pop() || '') : '-'}</div>
+                    <Button variant="outline-secondary" size="sm" onClick={zoomOut}>-</Button>
+                    <Button variant="outline-secondary" size="sm" onClick={zoomIn}>+</Button>
+                    <Button variant="outline-secondary" size="sm" onClick={resetView}>Reset</Button>
+                    <Button variant="outline-primary" size="sm" onClick={syncSourceUnits} disabled={!folder || sourceUnitSyncing}>
+                      {sourceUnitSyncing ? 'Syncing...' : 'Sync Segments'}
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
 
             {sectionVisibility.ocrText && (
-              <div style={{ flex: '1 1 0%', minWidth: 0 }}>
+              <div style={{ flex: '1 1 0%', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                 <div className="d-flex justify-content-between align-items-center mb-1">
                   <span className="fw-semibold small text-muted">Teks OCR</span>
                   <div className="d-flex align-items-center gap-3 flex-wrap">
@@ -2362,7 +2556,9 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
                 <div
                   className="p-3 border rounded-3 bg-body"
                   style={{
-                    height: '60vh',
+                    height: panelHeight,
+                    flex: fullView ? '1 1 auto' : undefined,
+                    minHeight: 0,
                     overflowY: 'auto',
                     whiteSpace: 'pre-wrap',
                     color: 'var(--bs-body-color)',
@@ -2381,7 +2577,7 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
             )}
 
             {sectionVisibility.translation && (
-              <div style={{ flex: '1 1 0%', minWidth: 0 }}>
+              <div style={{ flex: '1 1 0%', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                 <div className="d-flex justify-content-between align-items-center mb-1">
                   <span className="fw-semibold small text-muted">Terjemahan Database</span>
                   <Button variant="link" size="sm" className="p-0 text-decoration-none" onClick={() => openTranslateEditor('translated')}>
@@ -2391,7 +2587,9 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
                 <div
                   className="p-3 border rounded-3 bg-body"
                   style={{
-                    height: '60vh',
+                    height: panelHeight,
+                    flex: fullView ? '1 1 auto' : undefined,
+                    minHeight: 0,
                     overflowY: 'auto',
                     whiteSpace: 'pre-wrap',
                     color: 'var(--bs-body-color)'
@@ -2408,7 +2606,7 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
               Semua panel disembunyikan. Gunakan tombol di atas untuk menampilkan panel kembali.
             </div>
           ) : null}
-        </>
+        </div>
       ) : (
       <Row className="g-3">
         {/* Kolom Gambar - Lebar dinamis berdasarkan viewMode */}
@@ -2416,9 +2614,11 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
           md={viewMode === 'reader' ? 12 : 6}
         >
           <div className="d-flex align-items-center gap-2 mb-2 flex-wrap">
-            <Button variant="outline-secondary" size="sm" onClick={onBack}><i className="bi bi-arrow-left me-2" /> Back</Button>
+            <Button variant="outline-secondary" size="sm" onClick={handleBack}><i className="bi bi-arrow-left me-2" /> Back</Button>
             <Button variant="outline-secondary" size="sm" disabled={!canPrev} onClick={goPrev}><i className="bi bi-chevron-left" /> Prev</Button>
             <Button variant="outline-secondary" size="sm" disabled={!canNext} onClick={goNext}>Next <i className="bi bi-chevron-right" /></Button>
+            {renderMarkPageButton()}
+            {renderFullViewButton()}
           </div>
           {viewMode === 'ocr' && !sectionVisibility.image ? (
             <div className="border rounded-3 bg-body-tertiary p-3 d-flex flex-column align-items-start gap-2">
@@ -2658,7 +2858,7 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
       </Row>
       )}
 
-      {viewMode === 'ocr' && (
+      {viewMode === 'ocr' && !fullView && (
         <Row className="g-3 mt-1">
           <Col md={12}>
             {sectionVisibility.tools ? (
@@ -2794,7 +2994,7 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
       )}
 
       {/* Row Bawah Khusus Terjemahan untuk Study Mode */}
-      {viewMode === 'study' && studySubMode === 'makna' && (
+      {viewMode === 'study' && studySubMode === 'makna' && !fullView && (
         <Row className="g-3 mt-1">
           <Col md={6}></Col>
           <Col md={6}>
@@ -2812,7 +3012,7 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
       )}
 
       {/* Container Logging & Technical Tools (Disembunyikan di Reader Mode) */}
-      {viewMode !== 'reader' && (
+      {viewMode !== 'reader' && !fullView && (
         <Row className="g-3 mt-1">
           <Col md={12}>
           {renderTranslateProcessAlert()}
@@ -3473,6 +3673,6 @@ export default function SplitViewPage({ initialFolder = '', initialFile = '', in
           )}
         </Modal.Body>
       </Modal>
-    </>
+    </div>
   )
 }

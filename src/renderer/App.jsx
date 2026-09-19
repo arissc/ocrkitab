@@ -105,10 +105,13 @@ export default function App() {
   const [view, setView] = useState('dashboard') // 'dashboard' | 'pdf' | 'ocr' | 'gettext' | 'translate' | 'settings' | 'create_kitab' | 'kitab_detail'
   const [selectedFolder, setSelectedFolder] = useState('')
   const [selectedKitabId, setSelectedKitabId] = useState(null)
+  const [selectedKitabFolder, setSelectedKitabFolder] = useState('')
+  const [selectedKitabFile, setSelectedKitabFile] = useState('')
   const [createKitabDraft, setCreateKitabDraft] = useState(DEFAULT_CREATE_KITAB_DRAFT)
   const [pdfGenerateFlow, setPdfGenerateFlow] = useState({ pdfPath: '', outputFolder: '', textFolder: '' })
   const [ocrGenerateFlow, setOcrGenerateFlow] = useState({ inputFolder: '', outputFolder: '' })
-  const [splitData, setSplitData] = useState({ folder: '', file: '', imageFolder: '', origin: 'translate' })
+  const [splitData, setSplitData] = useState({ folder: '', file: '', imageFolder: '', origin: 'translate', originKitabId: null })
+  const [splitFullView, setSplitFullView] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window !== 'undefined') {
       const v = localStorage.getItem('sidebarCollapsed')
@@ -124,6 +127,88 @@ export default function App() {
   })
   const [globalStatus, setGlobalStatus] = useState({ ocr: { running: false, index: 0, total: 0, lastFile: null }, translate: { running: false, provider: null, model: null, attempt: 0 } })
 
+  const openSplitView = async (payload = {}, origin = 'translate', kitabId = null) => {
+    const folder = payload.folder || ''
+    const file = payload.file || ''
+    const imageFolder = payload.imageFolder || ''
+    let nextKitabId = payload.kitabId || payload.originKitabId || kitabId || null
+    if (!nextKitabId && folder && origin !== 'search' && api?.findKitabByFolder) {
+      try {
+        const res = await api.findKitabByFolder(folder)
+        if (res?.ok && res.data?.id) nextKitabId = res.data.id
+      } catch (_) {}
+    }
+    if (nextKitabId) setSelectedKitabId(nextKitabId)
+    if (folder) {
+      setSelectedFolder(folder)
+      setSelectedKitabFolder(folder)
+    }
+    if (file) setSelectedKitabFile(file)
+    const nextOrigin = origin === 'dashboard' && nextKitabId ? 'kitab_detail' : origin
+    setSplitData({
+      folder,
+      file,
+      imageFolder,
+      origin: nextOrigin,
+      originKitabId: nextKitabId
+    })
+    setView('split')
+  }
+
+  const restoreKitabContext = ({ folder = '', file = '', kitabId = null } = {}) => {
+    if (kitabId) setSelectedKitabId(kitabId)
+    if (folder) {
+      setSelectedFolder(folder)
+      setSelectedKitabFolder(folder)
+    }
+    if (file) setSelectedKitabFile(file)
+  }
+
+  const goBackFromSplit = async (current = {}) => {
+    const payload = current && typeof current === 'object' && !current.nativeEvent ? current : {}
+    const origin = payload.origin || splitData.origin
+    const folder = payload.folder || splitData.folder || ''
+    const file = payload.file || splitData.file || ''
+    const imageFolder = payload.imageFolder || splitData.imageFolder || ''
+    let kitabId = payload.kitabId || payload.originKitabId || splitData.originKitabId || null
+
+    setSplitData({
+      folder,
+      file,
+      imageFolder,
+      origin,
+      originKitabId: kitabId
+    })
+
+    if (origin === 'search') {
+      restoreKitabContext({ folder, file, kitabId })
+      setView('search')
+      return
+    }
+
+    if (!kitabId && folder && api?.findKitabByFolder) {
+      try {
+        const res = await api.findKitabByFolder(folder)
+        if (res?.ok && res.data?.id) kitabId = res.data.id
+      } catch (_) {}
+    }
+
+    if (kitabId) {
+      restoreKitabContext({ folder, file, kitabId })
+      setSplitData((prev) => ({ ...prev, originKitabId: kitabId, origin: origin === 'search' ? origin : 'kitab_detail' }))
+      setView('kitab_detail')
+      return
+    }
+
+    if (folder) {
+      restoreKitabContext({ folder, file })
+      setView('translate')
+      return
+    }
+
+    setView(origin === 'dashboard' ? 'dashboard' : 'translate')
+  }
+
   React.useEffect(() => {
     if (typeof document !== 'undefined') {
       document.documentElement.setAttribute('data-bs-theme', theme)
@@ -134,6 +219,10 @@ export default function App() {
   React.useEffect(() => {
     try { localStorage.setItem('sidebarCollapsed', sidebarCollapsed ? 'true' : 'false') } catch {}
   }, [sidebarCollapsed])
+
+  React.useEffect(() => {
+    if (view !== 'split') setSplitFullView(false)
+  }, [view])
 
   React.useEffect(() => {
     if (!api) return
@@ -180,49 +269,58 @@ export default function App() {
   }
 
   return (
-    <Container fluid className="py-3 d-flex flex-column vh-100 bg-body-tertiary">
-      <Navbar bg="body-tertiary" className="mb-3 border-bottom">
-        <Container fluid>
-          <Navbar.Brand className="fw-semibold">Universe Reader</Navbar.Brand>
-          {(globalStatus.ocr.running || globalStatus.translate.running) && (
+    <Container fluid className={`${splitFullView ? 'p-0' : 'py-3'} d-flex flex-column vh-100 bg-body-tertiary`}>
+      {!splitFullView && (
+        <Navbar bg="body-tertiary" className="mb-3 border-bottom">
+          <Container fluid>
+            <Navbar.Brand className="fw-semibold">Universe Reader</Navbar.Brand>
+            {(globalStatus.ocr.running || globalStatus.translate.running) && (
+              <div className="d-flex align-items-center gap-2">
+                {globalStatus.ocr.running && (
+                  <span className="badge text-bg-warning">
+                    <span className="me-2"><i className="bi bi-activity" /></span>
+                    OCR {globalStatus.ocr.index}/{globalStatus.ocr.total} {globalStatus.ocr.lastFile ? `(${globalStatus.ocr.lastFile})` : ''}
+                  </span>
+                )}
+                {globalStatus.translate.running && (
+                  <span className="badge text-bg-info">
+                    <span className="me-2"><i className="bi bi-stars" /></span>
+                    Translating {globalStatus.translate.provider}{globalStatus.translate.model ? ` • ${globalStatus.translate.model}` : ''}{globalStatus.translate.attempt ? ` • try ${globalStatus.translate.attempt}` : ''}{globalStatus.translate.fileName ? ` • ${globalStatus.translate.fileName}${globalStatus.translate.page ? ' (p' + globalStatus.translate.page + ')' : ''}` : ''}{globalStatus.translate.queueLength ? ` • queue ${globalStatus.translate.queueLength}` : ''}
+                  </span>
+                )}
+              </div>
+            )}
             <div className="d-flex align-items-center gap-2">
-              {globalStatus.ocr.running && (
-                <span className="badge text-bg-warning">
-                  <span className="me-2"><i className="bi bi-activity" /></span>
-                  OCR {globalStatus.ocr.index}/{globalStatus.ocr.total} {globalStatus.ocr.lastFile ? `(${globalStatus.ocr.lastFile})` : ''}
-                </span>
-              )}
-              {globalStatus.translate.running && (
-                <span className="badge text-bg-info">
-                  <span className="me-2"><i className="bi bi-stars" /></span>
-                  Translating {globalStatus.translate.provider}{globalStatus.translate.model ? ` • ${globalStatus.translate.model}` : ''}{globalStatus.translate.attempt ? ` • try ${globalStatus.translate.attempt}` : ''}{globalStatus.translate.fileName ? ` • ${globalStatus.translate.fileName}${globalStatus.translate.page ? ' (p' + globalStatus.translate.page + ')' : ''}` : ''}{globalStatus.translate.queueLength ? ` • queue ${globalStatus.translate.queueLength}` : ''}
-                </span>
-              )}
+              <Button variant="outline-secondary" size="sm" disabled={!api?.openNewWindow} onClick={openNewWindow}>
+                <i className="bi bi-window-plus me-1" /> Open in new window
+              </Button>
+              <Form.Check
+                type="switch"
+                id="themeSwitch"
+                label={theme === 'dark' ? 'Dark' : 'Light'}
+                checked={theme === 'dark'}
+                onChange={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              />
             </div>
-          )}
-          <div className="d-flex align-items-center gap-2">
-            <Button variant="outline-secondary" size="sm" disabled={!api?.openNewWindow} onClick={openNewWindow}>
-              <i className="bi bi-window-plus me-1" /> Open in new window
-            </Button>
-            <Form.Check
-              type="switch"
-              id="themeSwitch"
-              label={theme === 'dark' ? 'Dark' : 'Light'}
-              checked={theme === 'dark'}
-              onChange={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            />
-          </div>
-        </Container>
-      </Navbar>
-      {!api && (
+          </Container>
+        </Navbar>
+      )}
+      {!splitFullView && !api && (
         <Alert variant="warning" className="mb-3">Preview di browser: beberapa fitur nonaktif. Buka via Electron.</Alert>
       )}
-      <Row className="flex-fill min-h-0">
-        <Col xs={sidebarCollapsed ? 1 : 3} md={sidebarCollapsed ? 1 : 3} lg={sidebarCollapsed ? 1 : 3} className={`mb-3 mb-md-0 app-sidebar rounded-3 border sticky-sidebar ${sidebarCollapsed ? 'p-2' : 'p-3'}`}>
-          <Sidebar currentView={view} onNavigate={setView} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(c => !c)} />
-        </Col>
-        <Col xs={sidebarCollapsed ? 11 : 9} md={sidebarCollapsed ? 11 : 9} lg={sidebarCollapsed ? 11 : 9} className="d-flex flex-column">
-          <div className="app-content p-3 rounded-3 border flex-grow-1 overflow-auto">
+      <Row className={`flex-fill min-h-0 ${splitFullView ? 'g-0' : ''}`}>
+        {!splitFullView && (
+          <Col xs={sidebarCollapsed ? 1 : 3} md={sidebarCollapsed ? 1 : 3} lg={sidebarCollapsed ? 1 : 3} className={`mb-3 mb-md-0 app-sidebar rounded-3 border sticky-sidebar ${sidebarCollapsed ? 'p-2' : 'p-3'}`}>
+            <Sidebar currentView={view} onNavigate={setView} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(c => !c)} />
+          </Col>
+        )}
+        <Col
+          xs={splitFullView ? 12 : (sidebarCollapsed ? 11 : 9)}
+          md={splitFullView ? 12 : (sidebarCollapsed ? 11 : 9)}
+          lg={splitFullView ? 12 : (sidebarCollapsed ? 11 : 9)}
+          className={`d-flex flex-column ${splitFullView ? 'h-100' : ''}`}
+        >
+          <div className={`app-content flex-grow-1 ${splitFullView ? 'p-3 border-0 rounded-0 overflow-hidden d-flex flex-column' : 'p-3 rounded-3 border overflow-auto'}`}>
             {view === 'dashboard' && (
               <Dashboard
                 onOpenTranslate={(folderPath) => {
@@ -235,16 +333,10 @@ export default function App() {
                   setOcrGenerateFlow({ inputFolder: '', outputFolder: '' })
                   setView('create_kitab')
                 }}
-                onOpenKitabDetail={(id) => { setSelectedKitabId(id); setView('kitab_detail') }}
+                onOpenKitabDetail={(id) => { setSelectedKitabId(id); setSelectedKitabFolder(''); setSelectedKitabFile(''); setView('kitab_detail') }}
                 onOpenDirectSplit={(data) => {
                   if (data && data.folder && data.file) {
-                    setSplitData({ 
-                      folder: data.folder, 
-                      file: data.file, 
-                      imageFolder: data.imageFolder || '', 
-                      origin: 'dashboard' 
-                    })
-                    setView('split')
+                    openSplitView(data, 'dashboard', data.kitabId || data.originKitabId || null)
                   }
                 }}
               />
@@ -281,10 +373,9 @@ export default function App() {
             {view === 'translate' && (
               <TranslatePage
                 initialFolder={selectedFolder}
+                initialFile={selectedKitabFile}
                 onOpenSplit={(payload) => {
-                  const p = payload || {}
-                  setSplitData({ folder: p.folder || '', file: p.file || '', imageFolder: p.imageFolder || '', origin: 'translate' })
-                  setView('split')
+                  openSplitView(payload || {}, 'translate')
                 }}
               />
             )}
@@ -292,21 +383,10 @@ export default function App() {
               <SplitViewPage 
                 initialFolder={splitData.folder} 
                 initialFile={splitData.file} 
-                initialImageFolder={splitData.imageFolder} 
-                onBack={() => {
-                  const origin = splitData.origin
-                  setSplitData({ folder: '', file: '', imageFolder: '', origin: 'translate' })
-                  if (origin === 'dashboard') {
-                    setView('dashboard')
-                  } else if (origin === 'kitab_detail') {
-                    setView('kitab_detail')
-                  } else if (origin === 'search') {
-                    setView('search')
-                  } else {
-                    setSelectedFolder('')
-                    setView('translate')
-                  }
-                }} 
+                initialImageFolder={splitData.imageFolder}
+                originKitabId={splitData.originKitabId}
+                onBack={goBackFromSplit}
+                onFullViewChange={setSplitFullView}
               />
             )}
             {view === 'settings' && <SettingsPage />}
@@ -336,26 +416,24 @@ export default function App() {
             {view === 'kitab_detail' && (
               <KitabDetailPage
                 kitabId={selectedKitabId}
+                initialFolder={selectedKitabFolder}
+                initialFile={selectedKitabFile}
                 onBack={() => setView('dashboard')}
                 onOpenTranslate={(fp) => { setSelectedFolder(fp); setView('translate') }}
                 onOpenSplit={(payload) => {
-                  const p = payload || {}
-                  setSplitData({ folder: p.folder || '', file: p.file || '', imageFolder: p.imageFolder || '', origin: 'kitab_detail' })
-                  setView('split')
+                  openSplitView(payload || {}, 'kitab_detail', selectedKitabId)
                 }}
               />
             )}
             {view === 'search' && (
               <SearchPage
                 onOpenSplit={(payload) => {
-                  const p = payload || {}
-                  setSplitData({ folder: p.folder || '', file: p.file || '', imageFolder: p.imageFolder || '', origin: 'search' })
-                  setView('split')
+                  openSplitView(payload || {}, 'search', payload?.kitabId || null)
                 }}
               />
             )}
           </div>
-          {(globalStatus.ocr.running || globalStatus.translate.running) && (
+          {!splitFullView && (globalStatus.ocr.running || globalStatus.translate.running) && (
             <div className="position-fixed bottom-0 end-0 m-3" style={{ zIndex: 1040 }}>
               <Alert variant={globalStatus.ocr.running ? 'warning' : 'info'} className="shadow">
                 <div className="d-flex align-items-center gap-2">

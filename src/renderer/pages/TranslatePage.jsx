@@ -21,7 +21,7 @@ const chooseMatchingImage = (images, txtFile) => {
   return byBase || ''
 }
 
-export default function TranslatePage({ initialFolder = '', onOpenSplit }) {
+export default function TranslatePage({ initialFolder = '', initialFile = '', onOpenSplit }) {
   const api = typeof window !== 'undefined' ? window.api : undefined
   const [folder, setFolder] = useState('')
   const [imageFolder, setImageFolder] = useState('')
@@ -214,9 +214,9 @@ export default function TranslatePage({ initialFolder = '', onOpenSplit }) {
       setFiles(sorted)
       setCheckedPaths(prev => prev.filter(p => sorted.includes(p)))
       if (sorted.length > 0) {
-        const first = sorted[0]
-        setSelected(first)
-        await openFileContent(first)
+        const preferredFile = initialFile && sorted.includes(initialFile) ? initialFile : sorted[0]
+        setSelected(preferredFile)
+        await openFileContent(preferredFile)
       }
     } else {
       setFiles([])

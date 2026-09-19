@@ -268,7 +268,7 @@ export default function SearchPage({ onOpenSplit }) {
 
   const openResult = (item) => {
     if (!item.kitab_folder_path || !item.file_name) return
-    onOpenSplit({ folder: item.kitab_folder_path, file: item.file_name, origin: 'search' })
+    onOpenSplit({ folder: item.kitab_folder_path, file: item.file_name, kitabId: item.kitab_id || null, origin: 'search' })
   }
 
   return (

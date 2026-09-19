@@ -23,7 +23,7 @@ const findLatestSessionForFolders = (settings, folders) => {
   return null
 }
 
-export default function KitabDetailPage({ kitabId, onBack, onOpenTranslate, onOpenSplit }) {
+export default function KitabDetailPage({ kitabId, initialFolder = '', initialFile = '', onBack, onOpenTranslate, onOpenSplit }) {
   const api = typeof window !== 'undefined' ? window.api : undefined
   const [kitab, setKitab] = useState(null)
   const [pairs, setPairs] = useState([])
@@ -31,7 +31,7 @@ export default function KitabDetailPage({ kitabId, onBack, onOpenTranslate, onOp
   const [form, setForm] = useState({ id: null, nama_kitab: '', pengarang: '', keterangan: '', folder_pairs: [] })
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
-  const [panelFolder, setPanelFolder] = useState('')
+  const [panelFolder, setPanelFolder] = useState(initialFolder || '')
   const [deleting, setDeleting] = useState(false)
   const [lastSession, setLastSession] = useState(null)
 
@@ -67,6 +67,14 @@ export default function KitabDetailPage({ kitabId, onBack, onOpenTranslate, onOp
     }
     load()
   }, [kitabId])
+
+  useEffect(() => {
+    if (initialFolder) {
+      setPanelFolder(initialFolder)
+      return
+    }
+    if (lastSession?.folder) setPanelFolder(lastSession.folder)
+  }, [initialFolder, lastSession])
 
   const addTextFolder = async () => {
     if (!api || !api.selectFolder) return
@@ -125,7 +133,7 @@ export default function KitabDetailPage({ kitabId, onBack, onOpenTranslate, onOp
           {kitab.keterangan && <div className="mt-2" style={{ whiteSpace: 'pre-wrap' }}>{kitab.keterangan}</div>}
           {lastSession && (
             <div className="mt-3 p-2 border rounded bg-body">
-              <div className="small fw-semibold">Sesi terakhir</div>
+              <div className="small fw-semibold">Sesi terakhir{lastSession.marked ? ' • ditandai' : ''}</div>
               <div className="small text-muted">
                 {getFileName(lastSession.file)} • {new Date(lastSession.timestamp).toLocaleString()}
               </div>
@@ -229,6 +237,7 @@ export default function KitabDetailPage({ kitabId, onBack, onOpenTranslate, onOp
           folder={panelFolder}
           imageFolder={(pairs || []).find(p => p.folder_path === panelFolder)?.image_folder_path || ''}
           lastSessionFile={lastSession && lastSession.folder === panelFolder ? lastSession.file : ''}
+          initialFile={initialFile}
           onOpenSplit={onOpenSplit}
         />
       )}
@@ -236,7 +245,7 @@ export default function KitabDetailPage({ kitabId, onBack, onOpenTranslate, onOp
   )
 }
 
-function FolderTranslatePanel({ folder, imageFolder, lastSessionFile = '', onOpenSplit }) {
+function FolderTranslatePanel({ folder, imageFolder, lastSessionFile = '', initialFile = '', onOpenSplit }) {
   const api = typeof window !== 'undefined' ? window.api : undefined
   const [files, setFiles] = useState([])
   const [checkedPaths, setCheckedPaths] = useState([])
@@ -285,7 +294,7 @@ function FolderTranslatePanel({ folder, imageFolder, lastSessionFile = '', onOpe
       await refreshFiles(folder)
     }
     if (api && folder) load()
-  }, [folder, lastSessionFile])
+  }, [folder, lastSessionFile, initialFile])
 
   useEffect(() => {
     if (!api?.getDefaults) return
@@ -375,7 +384,9 @@ function FolderTranslatePanel({ folder, imageFolder, lastSessionFile = '', onOpe
       setFiles(sorted)
       setCheckedPaths(prev => prev.filter(p => sorted.includes(p)))
       if (sorted.length > 0) {
-        const preferredFile = lastSessionFile && sorted.includes(lastSessionFile) ? lastSessionFile : sorted[0]
+        const preferredFile = initialFile && sorted.includes(initialFile)
+          ? initialFile
+          : (lastSessionFile && sorted.includes(lastSessionFile) ? lastSessionFile : sorted[0])
         setSelected(preferredFile)
         await openFileContent(preferredFile)
       }
